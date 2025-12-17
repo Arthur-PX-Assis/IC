@@ -1,122 +1,145 @@
-import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
-import string
-import nltk
-from nltk.corpus import stopwords
+# Bibliotecas externas
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
-import testeT_Bonferroni
-import arvoreDecisao
-import gridSearch
-import tf_idf
-import knn
-import svm
+from nltk.corpus import stopwords
+from datasets import load_dataset
 
+import pandas as pd
+import nltk
 
-# Pre processamento (tudo minusculo, sem pontuacao e sem stop word)
-def pre_processar_texto(texto, stop_words):
-    texto = texto.lower()
-    
-    # Remover pontuação
-    texto = "".join([char for char in texto if char not in string.punctuation])
-    
-    # Remover Stopwords
-    # Quebramos o texto em palavras, filtramos e juntamos de volta
-    palavras = texto.split()
-    palavras_filtradas = [p for p in palavras if p not in stop_words]
-    
-    return " ".join(palavras_filtradas)
+# Meus módulos
+import funcoesVetorizacao as vet
+import funcoesAuxiliares as aux
+import funcoesFinetuning as ft
+import funcoesModelos as mod
+import funcoesAnalise as ana
 
-# Tecninca de Holdout (dividir em treino e teste)
-def divisao_treino_teste(df):
-    # Definindo quem é X (Dados) e quem é y (Respostas)
-    X = tf_idf.TF_IDF(df)
-
+def divisao_treino_teste(df, tecnica_representacao):
     # y: A coluna com a classificação real (ham/spam)
     le = LabelEncoder()
     y = le.fit_transform(df['label'])
+    textos_todos = df['clean_msg'].tolist()
     print(f"\nClasses convertidas: {le.classes_}")
+
+    # Definindo quem é X (dados) e quem é y (respostas)
+    if tecnica_representacao == "tfidf":
+        print(f"\n--- Gerando representação: TF-IDF ---")
+        X = vet.criar_features_tfidf(df)
+
+    elif tecnica_representacao == "word2vec":
+        print(f"\n--- Gerando representação: Word2Vec ---")
+        X = vet.criar_features_word2vec(df)
+
+    elif tecnica_representacao == "fasttext":
+        print(f"\n--- Gerando representação: FastText ---")
+        X = vet.criar_features_fasttext(df)
+
+    elif tecnica_representacao == "bert":
+        print(f"\n--- Gerando representação: BERT ---")
+        modelo_bert, tokenizer_bert, device_bert = vet.carregar_bert()
+        X = vet.criar_features_bert(df, modelo_bert, tokenizer_bert, device_bert)
+
+    elif tecnica_representacao == "bert_finetuned":
+        print(f"\n--- Preparando Fine-Tuning do BERT ---")
+
+        # Dividie o texto puro primeiro (antes de vetorizar)
+        # Isso garante que o fine-tuning nunca veja os dados de teste
+        textos_train, textos_test, y_train, y_test = train_test_split(
+            textos_todos, y, test_size=0.2, random_state=42
+        )
+
+        # Treina apenas com os textos de treino
+        modelo_ft, tokenizer_ft, device_ft = ft.realizar_finetuning(textos_train, y_train)
+
+        # Gera os vetores para o treino e para o teste usando o modelo treinado
+        print("Gerando vetores para Treino...")
+        X_train = ft.gerar_vetores_finetuned(textos_train, modelo_ft, tokenizer_ft, device_ft)
+
+        print("Gerando vetores para Teste...")
+        X_test = ft.gerar_vetores_finetuned(textos_test, modelo_ft, tokenizer_ft, device_ft)
+
+        # Retorna direto (pois já dividiu)
+        return X_train, X_test, y_train, y_test
+
+    else:
+        raise ValueError(f"Técnica '{tecnica_representacao}' não reconhecida. Use 'tfidf', 'word2vec' ou 'fasttext'.")
 
     # Dividindo os dados
     # test_size=0.2: Separa 20% dos dados para testar depois (prova final)
     # random_state=42: Garante que a divisão seja sempre a mesma (para seus resultados não mudarem a cada execução)
     return train_test_split(X, y, test_size=0.2, random_state=42)
 
-caminho_arquivo = 'smsspamcollection/SMSSpamCollection'
+def rodar_tecnica_representacao(df, tecnica_representacao, pasta_resultado):
 
-try:
-    df = pd.read_csv(caminho_arquivo, sep='\t', header=None, names=['label', 'message'])
-    print("Base de dados carregada com sucesso!")
-except FileNotFoundError:
-    print(f"Erro: Arquivo não encontrado no caminho: {caminho_arquivo}")
-    exit()
+    print(f"\n--- INICIANDO CICLO COM {tecnica_representacao.upper()} ---")
 
-# Visão Geral dos Dados
-print("\n--- Primeiras 5 linhas ---")
-print(df.head())
+    if tecnica_representacao == "tfidf":
+        caminho_escrita = aux.preparar_caminho(pasta_resultado, "resultadoTfidf.txt")
 
-print("\n--- Informações Gerais ---")
-print(df.info())
+    elif tecnica_representacao == "word2vec":
+        caminho_escrita = aux.preparar_caminho(pasta_resultado, "resultadoWord2Vec.txt")
 
-# Análise Inicial: Número de Documentos (Linhas)
-total_docs = len(df)
-print(f"\nNúmero total de documentos (mensagens): {total_docs}")
+    elif tecnica_representacao == "fasttext":
+        caminho_escrita = aux.preparar_caminho(pasta_resultado, "resultadoFastText.txt")
 
-# Distribuição de Classes (Spam vs Ham)
-print("\n--- Distribuição das Classes ---")
-print(df['label'].value_counts())
+    elif tecnica_representacao == "bert":
+        caminho_escrita = aux.preparar_caminho(pasta_resultado, "resultadoBert.txt")
 
-print("\nPorcentagem:")
-print(df['label'].value_counts(normalize=True) * 100)
+    elif tecnica_representacao == "bert_finetuned":
+        caminho_escrita = aux.preparar_caminho(pasta_resultado, "resultadoBertFineTuned.txt")
 
-# Plotando a distribuição de classes
-#plt.figure(figsize=(6, 4))
-#sns.countplot(x='label', data=df, palette='viridis')
-#plt.title('Distribuição de Classes (Ham vs Spam)')
-#plt.xlabel('Classe')
-#plt.ylabel('Contagem')
-#plt.show()
+    else:
+        raise ValueError(f"Técnica '{tecnica_representacao}' não reconhecida. Use 'tfidf', 'word2vec', 'fasttext' ou 'bert'.")
 
-# Análise de Palavras por Documento
-# Criando uma nova coluna 'word_count' contando o número de palavras em cada mensagem
-# Lambda pega linha a linha da coluna message e chama a funcao
-df['word_count'] = df['message'].apply(lambda mensagem_df: len(str(mensagem_df).split()))
+    X_train, X_test, y_train, y_test = divisao_treino_teste(df, tecnica_representacao)
 
-print("\n--- Estatísticas de Palavras por Documento ---")
-print(df['word_count'].describe())
+    with open(caminho_escrita, 'w', encoding='utf-8') as f:
+        pass
 
-# Estatísticas separadas por classe
-print("\n--- Estatísticas de Palavras (Média) por Classe ---")
-print(df.groupby('label')['word_count'].describe())
+    mod.KNN(X_train, y_train, X_test, y_test, caminho_escrita)
+    mod.SVM(X_train, y_train, X_test, y_test, caminho_escrita)
+    mod.arvore_decisao(X_train, y_train, X_test, y_test, caminho_escrita)
 
-# Plotando a distribuição do número de palavras
-#plt.figure(figsize=(10, 6))
-#sns.histplot(data=df, x='word_count', hue='label', bins=50, kde=True, palette='bright')
-#plt.title('Distribuição do Número de Palavras por Mensagem')
-#plt.xlabel('Número de Palavras')
-#plt.ylabel('Frequência')
-#plt.xlim(0, 100)
-#plt.show()
+    melhores_parametros = ana.rodar_grid(X_train, y_train, X_test, y_test, caminho_escrita)
+    ana.teste_estatistico(X_train, y_train, melhores_parametros, caminho_escrita)
 
-nltk.download("stopwords")
+if __name__ == "__main__":
+    # Carrega
+    # df = pd.read_csv('smsspamcollection/SMSSpamCollection', sep='\t', header=None, names=['label', 'message'])
+    # pasta_resultado = "resultadosSMSSpamCollection"
 
-# Definindo as Stopwords (palavras vazias) em inglês (linguagem do dataset)
-stop_words = set(stopwords.words('english'))
+    dataset_dict = load_dataset("imdb")
+    df = dataset_dict['train'].to_pandas()
+    pasta_resultado = "resultadosIMDB"
 
-# Aplicando a limpeza
-# Criamos uma nova coluna 'clean_msg' para comparar com a original
-df['clean_msg'] = df['message'].apply(lambda mensagem_df: pre_processar_texto(mensagem_df, stop_words))
+    # Visualiza como ele veio (para descobrir os nomes)
+    print("Colunas originais:", df.columns)
+    print(df.head())
 
-# Visualizando o Antes e Depois
-print("--- Antes e Depois ---")
-print(df[['message', 'clean_msg']].head())
+    # Renomear para o padrão do projeto ('message' e 'label')
+    # Supondo que as colunas originais sejam 'text' e 'label'
+    # Se forem diferentes basta ajustar
+    df = df.rename(columns={
+        'text': 'message',   # Renomeia o texto para 'message'
+        'label': 'label'     # 'label' geralmente já vem certo, mas garante
+    })
 
-X_train, X_test, y_train, y_test = divisao_treino_teste(df)
+    # Garante só o que precisa
+    df = df[['label', 'message']]
 
-knn.KNN(X_train, y_train, X_test, y_test)
-svm.SVM(X_train, y_train, X_test, y_test)
-arvoreDecisao.arvore_decisao(X_train, y_train, X_test, y_test)
+    # Limpa
+    nltk.download("stopwords", quiet=True)
+    stop_words = set(stopwords.words('english'))
 
-melhores_parametros = gridSearch.rodar_grid(X_train, y_train, X_test, y_test)
-testeT_Bonferroni.teste_estatistico(X_train, y_train, melhores_parametros)
+    df['clean_msg'] = df['message'].apply(lambda x: aux.pre_processar_texto(x, stop_words))
+
+    print("Dados prontos!")
+
+    # Análise dos dados
+    aux.analise_exploratoria(df)
+
+    rodar_tecnica_representacao(df, 'tfidf', pasta_resultado)
+    rodar_tecnica_representacao(df, 'word2vec', pasta_resultado)
+    rodar_tecnica_representacao(df, 'fasttext', pasta_resultado)
+    rodar_tecnica_representacao(df, 'bert', pasta_resultado)
+    rodar_tecnica_representacao(df, 'bert_finetuned', pasta_resultado)
