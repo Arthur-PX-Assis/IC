@@ -1,1 +1,1 @@
-Repositório feito pra armazenar os exercícios da IC
+Repositório feito pra armazenar os conteúdos da IC
