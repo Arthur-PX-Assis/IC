@@ -1,0 +1,13 @@
+venv/
+.env
+data/
+*.zip
+*.csv
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+.vscode/
+.idea/
+plots/
